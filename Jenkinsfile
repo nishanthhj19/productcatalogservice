@@ -45,7 +45,6 @@ pipeline {
                 sh "docker push ${IMAGE_NAME}"
             }
         }
-
         stage('Update GitOps Deployment') {
             steps {
                 withCredentials([usernamePassword(
@@ -74,7 +73,6 @@ pipeline {
                 }
             }
         }
-
     }
 
     post {
