@@ -1,9 +1,13 @@
 
+
+
 pipeline {
     agent any
 
     environment {
         DOCKER_IMAGE = "nishanthhj02/productcatalogservice"
+        GITOPS_REPO = "https://github.com/nishanthhj19/GitOps.git"
+        GITOPS_BRANCH = "main"
     }
 
     stages {
@@ -28,13 +32,17 @@ pipeline {
 
         stage('Run Unit Tests') {
             steps {
-                sh 'go test ./...'
+                sh '''
+                    set -e
+                    go test ./...
+                '''
             }
         }
 
         stage('Docker Build') {
             steps {
                 sh '''
+                    set -e
                     docker build -t "$IMAGE_NAME" .
                 '''
             }
@@ -48,6 +56,8 @@ pipeline {
                     passwordVariable: 'DOCKER_PASSWORD'
                 )]) {
                     sh '''
+                        set +x
+
                         echo "$DOCKER_PASSWORD" | docker login \
                             -u "$DOCKER_USERNAME" \
                             --password-stdin
@@ -59,6 +69,7 @@ pipeline {
         stage('Push to Docker Hub') {
             steps {
                 sh '''
+                    set -e
                     docker push "$IMAGE_NAME"
                 '''
             }
@@ -75,47 +86,52 @@ pipeline {
                     sh '''
                         set -e
 
-                        # Remove existing GitOps directory
-                        if [ -d "gitops" ]; then
-                            echo "Removing existing GitOps directory..."
-                            rm -rf gitops
-                        fi
-
                         # Clone GitOps repository
+                        rm -rf gitops
+
                         git clone \
+                            --branch "$GITOPS_BRANCH" \
                             "https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/nishanthhj19/GitOps.git" \
                             gitops
 
-                        # Correct Product Catalog path
-                        cd gitops/productcatalogservice/
+                        # Navigate to correct deployment directory
+                        cd gitops/base/productcatalogservice
+
+                        # Verify deployment file exists
+                        test -f deployment.yaml
 
                         # Configure Git
                         git config user.email "jenkins@ci.com"
                         git config user.name "jenkins"
 
-                        # Update image tag
-                        echo "Updating Product Catalog image: ${IMAGE_NAME}"
+                        # Update image
+                        echo "Updating Product Catalog image:"
+                        echo "$IMAGE_NAME"
 
                         sed -i \
                             "s|image: .*productcatalogservice.*|image: ${IMAGE_NAME}|g" \
                             deployment.yaml
 
-                        # Check changes
-                        if git diff --quiet; then
-                            echo "No changes detected."
-                            echo "Product Catalog image is already updated."
-                            exit 0
-                        fi
+                        # Verify updated image
+                        grep -F "image: ${IMAGE_NAME}" deployment.yaml
 
-                        # Commit changes
+                        # Stage changes
                         git add deployment.yaml
 
-                        git commit -m "Update productcatalogservice image to ${IMAGE_NAME}"
+                        # Check changes
+                        if git diff --cached --quiet; then
+                            echo "No changes detected."
+                            echo "Deployment image is already updated."
+                        else
+                            # Commit changes
+                            git commit \
+                                -m "Update Product Catalog image to ${IMAGE_NAME}"
 
-                        # Push changes
-                        git push origin main
+                            # Push to GitOps main
+                            git push origin "$GITOPS_BRANCH"
 
-                        echo "Product Catalog GitOps update successful."
+                            echo "GitOps deployment updated successfully."
+                        fi
                     '''
                 }
             }
